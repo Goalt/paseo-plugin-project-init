@@ -6,6 +6,10 @@ import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type { RpcInput } from "@getpaseo/plugin";
 import {
   COORDINATOR_ID,
+  COORDINATOR_MODE,
+  COORDINATOR_MODEL,
+  COORDINATOR_PROVIDER,
+  COORDINATOR_PROVIDER_CONFIG,
   DELEGATION_TOOL,
   PROJECT_NAME_PATTERN,
   type PresetSummary,
@@ -58,7 +62,10 @@ function renderClaudeMd(
   const section = (title: string, lines: string[]) =>
     lines.length === 0 ? "" : `\n## ${title}\n${lines.join("\n")}\n`;
   return template
-    + section("Agents", [`${agentLine(coordinator)} (main session)`, ...agents.map(agentLine)])
+    + section("Agents", [
+      `${agentLine(coordinator)} (main session, provider \`${COORDINATOR_PROVIDER}\`)`,
+      ...agents.map(agentLine),
+    ])
     + section("MCP servers", mcp.map(({ entry, agents: users }) =>
       `- \`${entry.name}\` — ${entry.description} (used by ${users.join(", ")})`))
     + section("Hooks", hooks.map((preset) =>
@@ -99,6 +106,34 @@ function collectUsedMcpServers(
   return [...used.values()];
 }
 
+/** Fills `{{agents}}` with the subagent list; without the placeholder the list is appended as a section. */
+export function renderCoordinatorBody(body: string, projectName: string, subagentList: string): string {
+  const withName = body.replaceAll("{{name}}", () => projectName);
+  return withName.includes("{{agents}}")
+    ? withName.replaceAll("{{agents}}", () => subagentList)
+    : `${withName.trimEnd()}\n\n## Subagents\n${subagentList}\n`;
+}
+
+/** Warning for a missing coordinator provider, with the fragment to add to ~/.paseo/config.json. */
+export function missingProviderWarning(): string {
+  const fragment = JSON.stringify({ agents: { providers: { [COORDINATOR_PROVIDER]: COORDINATOR_PROVIDER_CONFIG } } });
+  return `Provider "${COORDINATOR_PROVIDER}" is not configured, so the coordinator cannot start as the main session. `
+    + `Add this to ~/.paseo/config.json: ${fragment}`;
+}
+
+/** Whether the daemon config has an enabled coordinator provider; a failed lookup counts as missing. */
+async function hasCoordinatorProvider(paseo: PluginHandlerContext["paseo"], warnings: string[]) {
+  try {
+    const { config } = await paseo.config.get();
+    const provider = config.providers?.[COORDINATOR_PROVIDER];
+    if (provider && provider.enabled !== false) return true;
+  } catch (error) {
+    warnings.push(`Could not read the Paseo config: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  warnings.push(missingProviderWarning());
+  return false;
+}
+
 function git(cwd: string, args: string[]) {
   return new Promise<void>((resolve, reject) => {
     execFile("git", args, { cwd, timeout: 10_000 }, (error, _stdout, stderr) => {
@@ -132,7 +167,7 @@ async function writeProjectFile(root: string, relativePath: string, content: str
 }
 
 export async function createProject(
-  { name, claudeMd, coordinator, agents }: RpcInput<typeof createProjectRpc>,
+  { name, claudeMd, coordinator, agents, createSession }: RpcInput<typeof createProjectRpc>,
   { paseo }: PluginHandlerContext,
 ) {
   const trimmed = name.trim();
@@ -171,6 +206,8 @@ export async function createProject(
     warnings,
   );
 
+  const providerReady = await hasCoordinatorProvider(paseo, warnings);
+
   const root = projectsRoot();
   const target = path.join(root, trimmed);
   await mkdir(root, { recursive: true });
@@ -198,15 +235,16 @@ export async function createProject(
     : "No subagents in this project: do the work yourself.";
   files[`.claude/agents/${coordinatorPreset.id}.md`] = coordinatorPreset.render(
     coordinatorTools,
-    (body) => body.includes("{{agents}}")
-      ? body.replaceAll("{{agents}}", subagentList)
-      : `${body.trimEnd()}\n\n## Subagents\n${subagentList}\n`,
+    (body) => renderCoordinatorBody(body, trimmed, subagentList),
   );
   for (const { preset, tools } of selectedAgents) {
-    files[`.claude/agents/${preset.id}.md`] = preset.render(tools && [...new Set(tools)]);
+    files[`.claude/agents/${preset.id}.md`] = preset.render(
+      tools && [...new Set(tools)],
+      (body) => body.replaceAll("{{name}}", () => trimmed),
+    );
   }
-  // `agent` makes the main Claude session, including Paseo agents, run as the coordinator.
-  const settings: Record<string, unknown> = { agent: coordinatorPreset.name };
+  // No `agent` key: it would make every Paseo agent in the project start as the coordinator.
+  const settings: Record<string, unknown> = {};
   if (usedMcp.length > 0) {
     const mcpServers = Object.fromEntries(usedMcp.map(({ entry }) => [entry.name, entry.config]));
     files[".mcp.json"] = `${JSON.stringify({ mcpServers }, null, 2)}\n`;
@@ -232,6 +270,17 @@ export async function createProject(
     // Before opening the workspace, so Paseo registers the project as a git repository.
     await initGit(target, warnings);
     const workspace = await paseo.workspaces.open(target);
+    if (createSession && providerReady) {
+      // The project already exists, so a failed session is only a warning.
+      try {
+        await workspace.agents.create({
+          config: { provider: `${COORDINATOR_PROVIDER}/${COORDINATOR_MODEL}`, modeId: COORDINATOR_MODE },
+          prompt: `Hi! The project "${trimmed}" is set up. What would you like to work on first?`,
+        });
+      } catch (error) {
+        warnings.push(`Coordinator session was not created: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     return { path: target, workspaceId: workspace.id, files: Object.keys(files), warnings };
   } catch (error) {
     // The directory was created by this call, so remove it with whatever was written.

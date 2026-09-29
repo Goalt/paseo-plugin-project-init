@@ -84,9 +84,11 @@ project. Agents that inherit all tools don't add MCP servers.
 
 ### Coordinator: `agents/coordinator.md`
 
-Required and always added. The project's `.claude/settings.json` gets `"agent": "<name>"`, so the
-main Claude session, including Paseo agents started in the workspace, runs as the coordinator.
-Subagents cannot start other subagents, so delegation only works from this main session.
+Required and always added. It is written to `.claude/agents/`, but `.claude/settings.json` gets no
+`agent` key: that would make every Paseo agent started in the project run as the coordinator and
+delegate endlessly. The coordinator runs as the main session of a separate Paseo provider, see
+[Running the coordinator](#running-the-coordinator). Subagents cannot start other subagents, so
+delegation only works from this main session.
 
 - The plugin adds `Task(<selected subagents>)` to the coordinator's tools, so it can start exactly
   the project's subagents. `Task`/`Agent` entries in presets are ignored.
@@ -94,6 +96,36 @@ Subagents cannot start other subagents, so delegation only works from this main 
   If it inherits all tools, it can start any subagent.
 - `{{agents}}` in the body is replaced with the list of selected subagents; without the placeholder
   the list is appended as a "Subagents" section.
+- `{{name}}` is replaced with the project name (trimmed) in every agent body, like in `claude-md/`
+  templates.
+
+### Running the coordinator
+
+The coordinator needs the Paseo provider `claude-coordinator`. Add it to `~/.paseo/config.json`
+(the plugin never edits that file):
+
+```json
+{
+  "agents": {
+    "providers": {
+      "claude-coordinator": {
+        "extends": "claude",
+        "label": "Claude Coordinator",
+        "description": "Claude Code launched with --agent coordinator",
+        "command": ["/usr/local/bin/claude", "--agent", "coordinator"]
+      }
+    }
+  }
+}
+```
+
+If the provider is missing (or has `"enabled": false`, which counts as missing), the project is
+still created and the result carries a warning with this fragment. With the **Create coordinator
+session** switch on (the default) and the provider present, the plugin starts a
+`claude-coordinator` agent (model `claude-opus-5-5`, mode `auto`) in the new workspace with a short
+greeting. A failure to start it is only a warning.
+
+Migrating older projects: delete the `"agent": "coordinator"` line from `.claude/settings.json`.
 
 ### `hooks/<id>/`
 
@@ -119,3 +151,7 @@ skipped with a warning.
   }
 }
 ```
+
+## Development
+
+`npm run typecheck` and `npm test` (the tests need `git` installed).

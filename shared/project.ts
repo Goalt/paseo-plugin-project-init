@@ -19,8 +19,21 @@ export const AGENT_TOOLS = [
   "Skill",
 ] as const;
 
-/** Agent preset that is always added and runs the main Claude session via the `agent` setting. */
+/** Agent preset that is always added; it runs as the main session of the coordinator provider. */
 export const COORDINATOR_ID = "coordinator";
+
+/** Paseo provider that starts Claude Code with `--agent coordinator`; it lives in ~/.paseo/config.json. */
+export const COORDINATOR_PROVIDER = "claude-coordinator";
+export const COORDINATOR_MODEL = "claude-opus-5-5";
+export const COORDINATOR_MODE = "auto";
+
+/** The `agents.providers` entry that Paseo needs for the coordinator provider. */
+export const COORDINATOR_PROVIDER_CONFIG = {
+  extends: "claude",
+  label: "Claude Coordinator",
+  description: `Claude Code launched with --agent ${COORDINATOR_ID}`,
+  command: ["/usr/local/bin/claude", "--agent", COORDINATOR_ID],
+};
 
 /** Tool that lets the main session start subagents; managed by the plugin for the coordinator. */
 export const DELEGATION_TOOL = "Task";
@@ -50,6 +63,8 @@ export const createProjectRpc = defineRpc({
     coordinator: z.object({ tools: ToolsSchema }),
     /** tools: null inherits all tools. */
     agents: z.array(z.object({ id: z.string(), tools: ToolsSchema })),
+    /** Start a coordinator session in the new workspace, if the coordinator provider exists. */
+    createSession: z.boolean(),
   }),
   output: z.object({
     path: z.string(),
