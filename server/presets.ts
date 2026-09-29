@@ -192,7 +192,7 @@ async function loadClaudeMdPresets(directory: string, warnings: string[]) {
         id,
         name: attributes.name || id,
         description: attributes.description || `Template from ${file}`,
-        render: (projectName) => body.replaceAll("{{name}}", projectName),
+        render: (projectName) => body.replaceAll("{{name}}", () => projectName),
       });
     } catch (error) {
       warnings.push(`${file}: ${error instanceof Error ? error.message : String(error)}`);

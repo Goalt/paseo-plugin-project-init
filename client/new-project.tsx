@@ -16,6 +16,7 @@ import { ScrollView } from "react-native";
 import {
   AGENT_TOOLS,
   COORDINATOR_ID,
+  COORDINATOR_PROVIDER,
   DELEGATION_TOOL,
   PROJECT_NAME_PATTERN,
   createProjectRpc,
@@ -36,6 +37,7 @@ export function NewProjectSurface({ theme, layout, navigation }: PluginSurfacePr
   /** Selected agents (and edited coordinator tools) by preset id; null tools inherit all tools. */
   const [agents, setAgents] = useState<Record<string, string[] | null>>({});
   const [editingAgent, setEditingAgent] = useState<string | null>(null);
+  const [createSession, setCreateSession] = useState(true);
 
   const fetchRoot = useRpc(projectsRootRpc);
   const root = useQuery({ queryKey: ["project-init", "root"], queryFn: () => fetchRoot({}) });
@@ -154,7 +156,7 @@ export function NewProjectSurface({ theme, layout, navigation }: PluginSurfacePr
             <SettingsRow
               key={COORDINATOR_ID}
               label={`${coordinatorPreset.name} (always added)`}
-              hint={`Runs the main Claude session. ${coordinatorPreset.description}`}
+              hint={`Main session, runs on the ${COORDINATOR_PROVIDER} provider. ${coordinatorPreset.description}`}
             />,
             <SettingsAction
               key={`${COORDINATOR_ID}:tools`}
@@ -228,6 +230,13 @@ export function NewProjectSurface({ theme, layout, navigation }: PluginSurfacePr
             ? `From agents' tools: ${usedServers.join(", ")}`
             : "None: no selected agent uses mcp__ tools"}
         />
+        <SettingsSwitch
+          label="Create coordinator session"
+          hint={`Starts a ${COORDINATOR_PROVIDER} agent in the new workspace`}
+          value={createSession}
+          onValueChange={setCreateSession}
+          disabled={creation.isPending}
+        />
         <SettingsAction
           label="Create directory and workspace"
           actionLabel={creation.isPending ? "Creating…" : "Create"}
@@ -239,6 +248,7 @@ export function NewProjectSurface({ theme, layout, navigation }: PluginSurfacePr
               claudeMd: claudeMd === NO_CLAUDE_MD ? null : claudeMd,
               coordinator: { tools: coordinatorTools },
               agents: selectedAgents.map((preset) => ({ id: preset.id, tools: agents[preset.id] ?? null })),
+              createSession,
             })}
         />
       </SettingsSection>
