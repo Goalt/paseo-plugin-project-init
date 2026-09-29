@@ -1,0 +1,7 @@
+{
+  "id": "project-init",
+  "description": "Create a project directory and register it as a Paseo workspace",
+  "requirements": {
+    "paseo": ">=0.10.1"
+  }
+}
